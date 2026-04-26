@@ -10,6 +10,7 @@ VALID_TYPES = {"contract", "report", "invoice", "policy"}
 class QueryRequest(BaseModel):
     question: str
     filter_type: str | None = None
+    doc_ids: list[str] | None = None
 
 
 @router.post("/query")
@@ -21,5 +22,5 @@ def query_documents(req: QueryRequest):
     if filter_type and filter_type not in VALID_TYPES:
         filter_type = None
 
-    result = query_corpus(req.question, filter_type)
+    result = query_corpus(req.question, filter_type, req.doc_ids or None)
     return {"answer": result["answer"], "sources": result.get("sources", []), "filter_applied": filter_type}

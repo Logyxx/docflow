@@ -59,6 +59,8 @@ export default function DocFlow() {
   const [queryAnswer, setQueryAnswer] = useState('')
   const [querySources, setQuerySources] = useState<string[]>([])
   const [queryError, setQueryError] = useState('')
+  const [queryDocs, setQueryDocs] = useState<Document[]>([])
+  const [selectedDocIds, setSelectedDocIds] = useState<Set<string>>(new Set())
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault()
@@ -109,17 +111,41 @@ export default function DocFlow() {
     }
   }
 
+  async function loadQueryDocs() {
+    try {
+      const res = await fetch(`${BACKEND}/documents`)
+      const data = await res.json()
+      setQueryDocs(data)
+    } catch {
+      setQueryDocs([])
+    }
+  }
+
+  function toggleDoc(id: string) {
+    setSelectedDocIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
   async function runQuery() {
     if (!question.trim()) return
     setQueryLoading(true)
     setQueryAnswer('')
     setQuerySources([])
     setQueryError('')
+    const docIds = selectedDocIds.size > 0 ? Array.from(selectedDocIds) : null
     try {
       const res = await fetch(`${BACKEND}/query`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question, filter_type: queryFilter !== 'all' ? queryFilter : null }),
+        body: JSON.stringify({
+          question,
+          filter_type: queryFilter !== 'all' && !docIds ? queryFilter : null,
+          doc_ids: docIds,
+        }),
       })
       if (!res.ok) throw new Error(`Query failed: ${res.statusText}`)
       const data = await res.json()
@@ -149,6 +175,7 @@ export default function DocFlow() {
               onClick={() => {
                 setTab(t.key)
                 if (t.key === 'library') loadLibrary()
+                if (t.key === 'query') loadQueryDocs()
               }}
               className={`px-5 py-3 text-sm font-medium transition-colors border-b-2 -mb-px ${
                 tab === t.key
@@ -342,27 +369,90 @@ export default function DocFlow() {
 
         {/* QUERY TAB */}
         {tab === 'query' && (
-          <div className="space-y-8">
+          <div className="space-y-6">
             <div>
               <h1 className="text-2xl font-bold text-ink-primary">Query Your Corpus</h1>
-              <p className="text-ink-secondary text-sm mt-1">Ask anything across all indexed documents in plain English</p>
+              <p className="text-ink-secondary text-sm mt-1">Ask anything across your indexed documents in plain English</p>
             </div>
 
-            <div className="space-y-3">
-              <div className="flex gap-3">
-                <select
-                  value={queryFilter}
-                  onChange={e => setQueryFilter(e.target.value)}
-                  className="bg-bg-card border border-forest-border text-ink-primary text-sm rounded-lg px-3 py-2.5 focus:outline-none focus:border-forest-accent"
-                >
-                  <option value="all">All documents</option>
-                  <option value="contract">Contracts only</option>
-                  <option value="report">Reports only</option>
-                  <option value="invoice">Invoices only</option>
-                  <option value="policy">Policies only</option>
-                </select>
-              </div>
+            {/* Document picker */}
+            {queryDocs.length > 0 && (
+              <div className="rounded-xl border border-forest-border bg-bg-card p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs text-ink-secondary uppercase tracking-widest">
+                    {selectedDocIds.size === 0
+                      ? 'Querying all documents'
+                      : `Querying ${selectedDocIds.size} selected document${selectedDocIds.size > 1 ? 's' : ''}`}
+                  </p>
+                  {selectedDocIds.size > 0 && (
+                    <button
+                      onClick={() => setSelectedDocIds(new Set())}
+                      className="text-xs text-ink-muted hover:text-ink-secondary transition-colors"
+                    >
+                      Clear selection
+                    </button>
+                  )}
+                </div>
+                <div className="flex flex-col gap-1.5 max-h-48 overflow-y-auto">
+                  {queryDocs.map(doc => {
+                    const selected = selectedDocIds.has(String(doc.id))
+                    return (
+                      <button
+                        key={doc.id}
+                        onClick={() => toggleDoc(String(doc.id))}
+                        className={`flex items-center gap-3 px-3 py-2 rounded-lg text-left transition-colors ${
+                          selected
+                            ? 'bg-forest-accent/10 border border-forest-accent/40'
+                            : 'hover:bg-bg-hover border border-transparent'
+                        }`}
+                      >
+                        <div className={`w-4 h-4 rounded flex items-center justify-center flex-shrink-0 border transition-colors ${
+                          selected ? 'bg-forest-accent border-forest-accent' : 'border-forest-border'
+                        }`}>
+                          {selected && (
+                            <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
+                              <path d="M2 5l2.5 2.5L8 3" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                            </svg>
+                          )}
+                        </div>
+                        <span className="text-sm text-ink-primary truncate flex-1">{doc.filename}</span>
+                        <span className={`flex-shrink-0 text-xs px-2 py-0.5 rounded-full border ${DOC_TYPE_COLORS[doc.doc_type] || DOC_TYPE_COLORS.unknown}`}>
+                          {doc.doc_type}
+                        </span>
+                      </button>
+                    )
+                  })}
+                </div>
 
+                {/* Category filter — only when no specific docs selected */}
+                {selectedDocIds.size === 0 && (
+                  <div className="pt-2 border-t border-forest-border flex items-center gap-2">
+                    <span className="text-xs text-ink-muted">Filter by type:</span>
+                    <select
+                      value={queryFilter}
+                      onChange={e => setQueryFilter(e.target.value)}
+                      className="bg-bg-secondary border border-forest-border text-ink-primary text-xs rounded-lg px-2 py-1.5 focus:outline-none focus:border-forest-accent"
+                    >
+                      <option value="all">All</option>
+                      <option value="contract">Contracts</option>
+                      <option value="report">Reports</option>
+                      <option value="invoice">Invoices</option>
+                      <option value="policy">Policies</option>
+                    </select>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {queryDocs.length === 0 && (
+              <div className="rounded-xl border border-forest-border bg-bg-card p-4 text-center text-ink-secondary text-sm">
+                No documents indexed yet —{' '}
+                <button onClick={() => { setTab('upload') }} className="text-forest-accent hover:underline">upload one first</button>
+              </div>
+            )}
+
+            {/* Question input */}
+            <div className="space-y-3">
               <div className="relative">
                 <textarea
                   value={question}
@@ -387,7 +477,6 @@ export default function DocFlow() {
                 </button>
               </div>
 
-              {/* Example prompts */}
               {!queryAnswer && !queryLoading && (
                 <div className="flex flex-wrap gap-2">
                   {[

@@ -40,7 +40,7 @@ def remove_document(doc_id: str):
     corpus_store.pop(doc_id, None)
 
 
-def query_corpus(question: str, filter_type: str | None = None) -> dict:
+def query_corpus(question: str, filter_type: str | None = None, doc_ids: list[str] | None = None) -> dict:
     if not corpus_store:
         return {"answer": "No documents have been indexed yet. Upload some documents first.", "sources": []}
 
@@ -51,7 +51,8 @@ def query_corpus(question: str, filter_type: str | None = None) -> dict:
     targets = {
         doc_id: entry
         for doc_id, entry in corpus_store.items()
-        if filter_type is None or entry["doc_type"] == filter_type
+        if (doc_ids is None or doc_id in doc_ids)
+        and (filter_type is None or entry["doc_type"] == filter_type)
     }
 
     if not targets:
