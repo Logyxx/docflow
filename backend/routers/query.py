@@ -21,5 +21,5 @@ def query_documents(req: QueryRequest):
     if filter_type and filter_type not in VALID_TYPES:
         filter_type = None
 
-    answer = query_corpus(req.question, filter_type)
-    return {"answer": answer, "filter_applied": filter_type}
+    result = query_corpus(req.question, filter_type)
+    return {"answer": result["answer"], "sources": result.get("sources", []), "filter_applied": filter_type}

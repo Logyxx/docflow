@@ -1,18 +1,15 @@
 """
-RAG layer: per-document FAISS indexes + Groq generation.
-corpus_index maps doc_id → (vectorstore, doc_type)
+RAG layer: in-memory chunk store + Groq generation.
+No external embedding API needed — chunks are stored as plain text
+and retrieved by simple keyword overlap. Reliable on Render free tier.
 """
 import os
-from langchain_community.embeddings import HuggingFaceInferenceAPIEmbeddings
-from langchain_community.vectorstores import FAISS
 from langchain_groq import ChatGroq
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-EMBED_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
-_embeddings = None
-corpus_index: dict[str, tuple] = {}
+corpus_store: dict[str, dict] = {}  # doc_id → {doc_type, chunks: list[str]}
 
 SPLITTER = RecursiveCharacterTextSplitter(chunk_size=800, chunk_overlap=100)
 
@@ -27,64 +24,57 @@ Document excerpts:
 ])
 
 
-def _get_embeddings() -> HuggingFaceInferenceAPIEmbeddings:
-    global _embeddings
-    if _embeddings is None:
-        _embeddings = HuggingFaceInferenceAPIEmbeddings(
-            api_key=os.getenv("HF_TOKEN", ""),
-            model_name=EMBED_MODEL,
-        )
-    return _embeddings
+def _score_chunk(chunk: str, question: str) -> int:
+    q_words = set(question.lower().split())
+    return sum(1 for w in q_words if w in chunk.lower())
 
 
 def index_document(doc_id: str, doc_type: str, text: str) -> int:
-    """Chunk, embed, and store document in corpus_index. Returns chunk count."""
-    chunks = SPLITTER.create_documents([text])
-    if not chunks:
-        return 0
-    vectorstore = FAISS.from_documents(chunks, _get_embeddings())
-    corpus_index[doc_id] = (vectorstore, doc_type)
+    docs = SPLITTER.create_documents([text])
+    chunks = [d.page_content for d in docs]
+    corpus_store[doc_id] = {"doc_type": doc_type, "chunks": chunks}
     return len(chunks)
 
 
 def remove_document(doc_id: str):
-    corpus_index.pop(doc_id, None)
+    corpus_store.pop(doc_id, None)
 
 
-def query_corpus(question: str, filter_type: str | None = None) -> str:
-    """Search relevant documents and generate a grounded answer via Groq."""
-    if not corpus_index:
-        return "No documents have been indexed yet. Upload some documents first."
+def query_corpus(question: str, filter_type: str | None = None) -> dict:
+    if not corpus_store:
+        return {"answer": "No documents have been indexed yet. Upload some documents first.", "sources": []}
 
     groq_key = os.getenv("GROQ_API_KEY")
     if not groq_key:
-        return "GROQ_API_KEY is not set — cannot generate answer."
+        return {"answer": "GROQ_API_KEY is not set.", "sources": []}
 
-    # Select which indexes to search
     targets = {
-        doc_id: (vs, dt)
-        for doc_id, (vs, dt) in corpus_index.items()
-        if filter_type is None or dt == filter_type
+        doc_id: entry
+        for doc_id, entry in corpus_store.items()
+        if filter_type is None or entry["doc_type"] == filter_type
     }
 
     if not targets:
-        return f"No {filter_type} documents indexed. Upload some first."
+        return {"answer": f"No {filter_type} documents indexed. Upload some first.", "sources": []}
 
-    # Retrieve top chunks from each matching document
     all_chunks = []
-    for doc_id, (vs, doc_type) in targets.items():
-        try:
-            results = vs.similarity_search(question, k=3)
-            for r in results:
-                all_chunks.append(f"[{doc_type.upper()}]\n{r.page_content}")
-        except Exception:
-            continue
+    for entry in targets.values():
+        doc_type = entry["doc_type"]
+        scored = sorted(entry["chunks"], key=lambda c: _score_chunk(c, question), reverse=True)
+        for chunk in scored[:3]:
+            all_chunks.append((doc_type, chunk, _score_chunk(chunk, question)))
 
-    if not all_chunks:
-        return "Could not retrieve relevant content."
+    all_chunks.sort(key=lambda x: x[2], reverse=True)
+    top_chunks = all_chunks[:8]
 
-    context = "\n\n---\n\n".join(all_chunks[:8])
+    if not top_chunks:
+        return {"answer": "Could not retrieve relevant content.", "sources": []}
+
+    context = "\n\n---\n\n".join(f"[{dt.upper()}]\n{chunk}" for dt, chunk, _ in top_chunks)
+    sources = list(dict.fromkeys(dt for dt, _, _ in top_chunks))
 
     llm = ChatGroq(model="llama-3.1-8b-instant", temperature=0.1, max_tokens=512)
     chain = RAG_PROMPT | llm | StrOutputParser()
-    return chain.invoke({"question": question, "context": context})
+    answer = chain.invoke({"question": question, "context": context})
+
+    return {"answer": answer, "sources": sources}

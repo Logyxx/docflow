@@ -63,7 +63,7 @@ async def upload_document(file: UploadFile = File(...), db: Session = Depends(ge
     return {
         "id": doc_id,
         "filename": file.filename,
-        "type": result["type"],
+        "doc_type": result["type"],
         "confidence": result["confidence"],
         "summary": result["summary"],
         "chunks_indexed": chunk_count,
