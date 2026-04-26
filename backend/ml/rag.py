@@ -3,7 +3,7 @@ RAG layer: per-document FAISS indexes + Groq generation.
 corpus_index maps doc_id → (vectorstore, doc_type)
 """
 import os
-from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_community.embeddings import HuggingFaceInferenceAPIEmbeddings
 from langchain_community.vectorstores import FAISS
 from langchain_groq import ChatGroq
 from langchain_core.prompts import ChatPromptTemplate
@@ -27,13 +27,12 @@ Document excerpts:
 ])
 
 
-def _get_embeddings() -> HuggingFaceEmbeddings:
+def _get_embeddings() -> HuggingFaceInferenceAPIEmbeddings:
     global _embeddings
     if _embeddings is None:
-        _embeddings = HuggingFaceEmbeddings(
+        _embeddings = HuggingFaceInferenceAPIEmbeddings(
+            api_key=os.getenv("HF_TOKEN", ""),
             model_name=EMBED_MODEL,
-            model_kwargs={"device": "cpu"},
-            encode_kwargs={"normalize_embeddings": True},
         )
     return _embeddings
 
