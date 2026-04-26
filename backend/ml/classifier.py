@@ -5,9 +5,8 @@ Swap CLASSIFIER_MODEL to 'lakshmenroy/docflow-classifier' once fine-tuned on Col
 import os
 import requests
 
-CLASSIFIER_MODEL = "facebook/bart-large-mnli"
+CLASSIFIER_MODEL = "lakshmenroy/docflow-classifier"
 HF_API_URL = f"https://api-inference.huggingface.co/models/{CLASSIFIER_MODEL}"
-CANDIDATE_LABELS = ["contract", "report", "invoice", "policy"]
 
 SUMMARIES = {
     "contract": "Legal agreement document — contains obligations, terms, and parties.",
@@ -30,18 +29,17 @@ def classify_document(text: str) -> dict:
         response = requests.post(
             HF_API_URL,
             headers={"Authorization": f"Bearer {hf_token}"},
-            json={
-                "inputs": text[:1024],
-                "parameters": {"candidate_labels": CANDIDATE_LABELS},
-            },
+            json={"inputs": text[:512]},
             timeout=30,
         )
         if response.status_code != 200:
             return _heuristic_classify(text)
 
         result = response.json()
-        doc_type = result["labels"][0]
-        confidence = round(result["scores"][0], 4)
+        # Sequence classifier returns [[{label, score}, ...]]
+        scores = sorted(result[0], key=lambda x: x["score"], reverse=True)
+        doc_type = scores[0]["label"]
+        confidence = round(scores[0]["score"], 4)
         return {
             "type": doc_type,
             "confidence": confidence,
