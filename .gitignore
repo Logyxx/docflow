@@ -1,3 +1,4 @@
+# Python
 .env
 __pycache__/
 *.pyc
@@ -7,5 +8,14 @@ venv/
 docflow.db
 vectorstore/
 *.egg-info/
-dist/
+.pytest_cache/
+
+# Node
+frontend/node_modules/
+frontend/dist/
+frontend/.env.local
+frontend/.env.production
+
+# OS
 .DS_Store
+Thumbs.db
